@@ -24,8 +24,9 @@ from qgis.core import (QgsApplication, QgsProject, QgsVectorLayer,
                        QgsRendererCategory, QgsMarkerSymbol,
                        QgsLineSymbol, QgsFillSymbol,
                        QgsCoordinateReferenceSystem, QgsCoordinateTransform,
-                       QgsRectangle, QgsMapSettings,
-                       QgsMapRendererCustomPainterJob)
+                       QgsRectangle, QgsReferencedRectangle,
+                       QgsMapSettings, QgsMapRendererCustomPainterJob,
+                       QgsSettings)
 try:
     from PyQt6.QtCore import QSize
     from PyQt6.QtGui import QImage, QPainter, QColor
@@ -191,6 +192,11 @@ def render_preview(rect):
 
 
 rect = bounds()
+# bake an initial view centred on the playa so the project opens zoomed in
+QgsSettings().setValue("qgis/saveProjectViewSettings", True)
+p.viewSettings().setDefaultViewExtent(
+    QgsReferencedRectangle(rect, QgsCoordinateReferenceSystem.fromEpsgId(3857)))
+
 qgs = os.path.join(WORK, f"bm_city_{YEAR}.qgs")
 ok = p.write(qgs)
 if not ok:
