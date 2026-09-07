@@ -202,21 +202,17 @@ def load_streets(path):
 
 def read_anchors_csv(path):
     """read an anchors csv: either name,lat,lon header or headerless rows."""
-    anchors = []
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        parsed = list(reader)
-        if not parsed:
-            return anchors
-        if "name" not in parsed[0]:
-            for line in parsed:
-                vals = list(line.values())
-                if len(vals) == 3:
-                    anchors.append((vals[0].strip(), float(vals[1]), float(vals[2])))
-        else:
-            for row in parsed:
-                anchors.append((row["name"].strip(), float(row["lat"]),
-                                float(row["lon"])))
+        raw = [r for r in csv.reader(f)
+               if r and any(cell.strip() for cell in r)]
+    if not raw:
+        return []
+    has_header = raw[0][0].strip().lower() == "name"
+    anchors = []
+    for row in raw[1:] if has_header else raw:
+        if len(row) < 3:
+            continue
+        anchors.append((row[0].strip(), float(row[1]), float(row[2])))
     return anchors
 
 
