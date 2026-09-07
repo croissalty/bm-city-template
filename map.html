@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>burning man city template preview</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    #legend {
+      position: absolute; z-index: 1000;
+      top: 10px; right: 10px; background: rgba(255,255,255,.92);
+      padding: 8px 12px; border-radius: 6px;
+      font: 13px/1.5 system-ui, sans-serif;
+      box-shadow: 0 1px 4px rgba(0,0,0,.3);
+    }
+    .sw { display: inline-block; width: 12px; height: 12px;
+          border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+    #legend .entered { background: #2e8b57; }
+    #legend .autofilled { background: #f0a500; }
+    #legend .many { background: #999; }
+    #legend b { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="legend">
+    <b>status</b><br />
+    <span class="sw entered"></span>entered (confirmed anchor)<br />
+    <span class="sw autofilled"></span>autofilled <i>unconfirmed</i><br />
+    <span class="sw many"></span>street grid (autofilled)<br />
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const URL_PARAM = new URLSearchParams(location.search).get("year") || "2026";
+
+    const map = L.map("map");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(map);
+
+    fetch(`places_${URL_PARAM}_fill.geojson`)
+      .then((r) => r.json())
+      .then((gj) => {
+        const entered = L.geoJSON(gj, {
+          filter: (f) => f.properties.status === "entered",
+          pointToLayer: (f, latlng) =>
+            L.circleMarker(latlng, { radius: 7, color: "#155d3a", weight: 1,
+              fillColor: "#2e8b57", fillOpacity: 0.9 }),
+          onEachFeature: (f, l) => l.bindPopup(
+            `<b>${f.properties.name}</b><br/>entered anchor`),
+        }).addTo(map);
+
+        const autofilled = L.geoJSON(gj, {
+          filter: (f) => f.properties.status === "autofilled",
+          pointToLayer: (f, latlng) =>
+            L.circleMarker(latlng, {
+              radius: 5,
+              color: "#b07a00", weight: 1,
+              fillColor: "#f0a500", fillOpacity: 0.85,
+              dashArray: "2 2",
+            }),
+          onEachFeature: (f, l) => l.bindPopup(
+            `<b>${f.properties.name}</b><br/>autofilled — <i>unconfirmed</i>`),
+        }).addTo(map);
+
+        if (gj.features.some((f) => f.properties.status === "autofilled_street")) {
+          L.geoJSON(gj, {
+            filter: (f) => f.properties.status === "autofilled_street",
+            style: { color: "#999", weight: 1, opacity: 0.55 },
+          }).addTo(map);
+        }
+
+        map.fitBounds(L.geoJSON(gj).getBounds().pad(0.1));
+        document.title =
+          `burning man ${URL_PARAM} — ${entered.getLayers().length} entered, ` +
+          `${autofilled.getLayers().length} autofilled`;
+      })
+      .catch((e) => {
+        document.title = "load error";
+        alert(`could not load places_${URL_PARAM}_fill.geojson: ${e}`);
+      });
+  </script>
+</body>
+</html>
