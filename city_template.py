@@ -21,6 +21,7 @@ import csv
 import json
 import math
 import os
+import subprocess
 import sys
 
 # ---------------------------------------------------------------------------
@@ -33,8 +34,11 @@ EARTH_RADIUS_FT = 20902231  # mean earth radius in feet
 DEFAULT_REF_YEAR = 2026
 
 ANCHORS_BASENAME = "anchors_{year}.csv"
+ANCHORS_GEOJSON_BASENAME = "anchors_{year}.geojson"
 OUT_CSV_BASENAME = "places_{year}_fill.csv"
 OUT_GEOJSON_BASENAME = "places_{year}_fill.geojson"
+STREETS_GEOJSON_BASENAME = "streets_{year}_fill.geojson"
+QGSPROJ_BASENAME = "bm_city_{year}.qgs"
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +200,119 @@ def load_streets(path):
     return out
 
 
+def read_anchors_csv(path):
+    """read an anchors csv: either name,lat,lon header or headerless rows."""
+    anchors = []
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        parsed = list(reader)
+        if not parsed:
+            return anchors
+        if "name" not in parsed[0]:
+            for line in parsed:
+                vals = list(line.values())
+                if len(vals) == 3:
+                    anchors.append((vals[0].strip(), float(vals[1]), float(vals[2])))
+        else:
+            for row in parsed:
+                anchors.append((row["name"].strip(), float(row["lat"]),
+                                float(row["lon"])))
+    return anchors
+
+
+def parse_anchor_arg(text):
+    """parse 'name, lat, lon' tolerance of spaces and extra commas."""
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) != 3:
+        raise ValueError(f"expected 'name,lat,lon' — got: {text!r}")
+    return parts[0], float(parts[1]), float(parts[2])
+
+
+def prompt_anchors():
+    """interactive fallback so you can type anchors straight in the shell."""
+    print("no anchors file — enter anchors one per line as: name, lat, lon")
+    print("(blank line to finish)")
+    anchors = []
+    while True:
+        try:
+            line = input("anchor> ").strip()
+        except EOFError:
+            break
+        if not line:
+            break
+        try:
+            anchors.append(parse_anchor_arg(line))
+        except ValueError as e:
+            print(f"  skip: {e}")
+    return anchors
+
+
+def collect_anchors(args, anchors_path, ref_by_name):
+    """anchors come from a csv, repeated --anchor flags, or a prompt."""
+    anchors = []
+    if os.path.exists(anchors_path):
+        anchors = read_anchors_csv(anchors_path)
+        if not anchors:
+            print(f"  ({anchors_path} was empty; falling back to --anchor/prompt)")
+    for fa in getattr(args, "anchor", None) or []:
+        anchors.append(parse_anchor_arg(fa))
+    if not os.path.exists(anchors_path) and not getattr(args, "anchor", None):
+        anchors = prompt_anchors()
+
+    seen = {}
+    for name, lat, lon in anchors:
+        if name in seen:
+            sys.exit(f"duplicate anchor '{name}' given twice")
+        seen[name] = True
+        if name not in ref_by_name:
+            sys.exit(f"anchor '{name}' not in reference data — check spelling")
+    if len(anchors) < 2:
+        sys.exit("need at least 2 anchors to fit the city transform")
+    return anchors
+
+
+# ---------------------------------------------------------------------------
+# QGIS project (.qgs) generation -- QGIS itself authors the project
+# ---------------------------------------------------------------------------
+
+# QGIS python bundled with the app. set QGIS_PYTHON to override.
+QGIS_MAC_QPY = "/Applications/QGIS.app/Contents/MacOS/python3.12"
+MAKEPROJ = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "make_qgis_project.py")
+
+
+def _qgis_env(qpy):
+    """the env the QGIS-bundled python needs to run headless."""
+    contents = os.path.dirname(os.path.dirname(qpy))  # .../QGIS.app/Contents
+    return {
+        "PYTHONHOME": os.path.join(contents, "Frameworks"),
+        "PYTHONPATH": os.path.join(contents, "Resources", "python"),
+        "QGIS_PREFIX_PATH": os.path.join(contents, "MacOS"),
+        "DYLD_FRAMEWORK_PATH": os.path.join(contents, "Frameworks"),
+        "PROJ_LIB": os.path.join(contents, "Resources", "qgis", "proj"),
+        "QT_QPA_PLATFORM": "offscreen",
+    }
+
+
+def build_qgis_project_via_qgis(year, workdir, ref_year=DEFAULT_REF_YEAR):
+    """run make_qgis_project.py under the QGIS-bundled python so QGIS itself
+    authors bm_city_<year>.qgs: project CRS, layer CRSs, styles and the osm
+    tile base are all correct by construction (no hand-written XML)."""
+    qpy = os.environ.get("QGIS_PYTHON", QGIS_MAC_QPY)
+    if not os.path.exists(qpy):
+        print(f"  (QGIS python not found at {qpy}; set QGIS_PYTHON to also "
+              "generate the ready-to-open map)")
+        return None
+    env = dict(os.environ)
+    env.update(_qgis_env(qpy))
+    cmd = [qpy, MAKEPROJ, str(year), os.path.abspath(workdir), str(ref_year)]
+    proc = subprocess.run(cmd, env=env, cwd=workdir, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError("QGIS project step failed (see output above)")
+    qgs_path = QGSPROJ_BASENAME.format(year=year)
+    return qgs_path if os.path.exists(qgs_path) else None
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -206,6 +323,8 @@ def main():
     ap.add_argument("--reference-dir", default="reference")
     ap.add_argument("--include-streets", action="store_true",
                     help="also transform the street grid (rings + avenues)")
+    ap.add_argument("--anchor", action="append", metavar="'name,lat,lon'",
+                    help="an anchor you entered (repeatable; no csv file needed)")
     args = ap.parse_args()
 
     year = args.year
@@ -213,12 +332,6 @@ def main():
     ref_year = DEFAULT_REF_YEAR
 
     anchors_path = ANCHORS_BASENAME.format(year=year)
-    if not os.path.exists(anchors_path):
-        sys.exit(
-            f"no {anchors_path} found — create it with columns: name,lat,lon\n"
-            "  use exactly the names from the reference files so the template "
-            "knows which anchor maps to which place."
-        )
 
     # 1. load reference places
     places = load_cpns(os.path.join(ref_dir, f"cpns_{ref_year}.geojson"))
@@ -226,36 +339,18 @@ def main():
         ref_dir, f"plazas_{ref_year}.geojson"))
     ref_by_name = {p["name"]: p for p in places}
 
-    # 2. load anchors
-    anchors = []
-    with open(anchors_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        parsed = list(reader)
-        if not parsed:
-            sys.exit(f"{anchors_path} is empty")
-        # tolerate a headerless file: first real row looks like data
-        if "name" not in parsed[0]:
-            for line in parsed:
-                vals = list(line.values())
-                if len(vals) == 3:
-                    anchors.append((vals[0].strip(), float(vals[1]), float(vals[2])))
-        else:
-            for row in parsed:
-                name = row["name"].strip()
-                try:
-                    lat = float(row["lat"])
-                    lon = float(row["lon"])
-                except (KeyError, ValueError):
-                    sys.exit(f"line in {anchors_path} missing name/lat/lon columns")
-                anchors.append((name, lat, lon))
-    if not anchors:
-        sys.exit("no usable anchor rows — expected name,lat,lon")
-    for name, _, _ in anchors:
-        if name not in ref_by_name:
-            sys.exit(f"anchor '{name}' not in reference data — check spelling")
+    # 2. get anchors (csv file, --anchor flags, or an interactive prompt)
+    anchors = collect_anchors(args, anchors_path, ref_by_name)
 
-    if len(anchors) < 2:
-        sys.exit("need at least 2 anchors to fit the city transform")
+    # 2b. dot anchor points for QGIS/a quick glance
+    anchor_names = [a[0] for a in anchors]
+    anchor_gj = {"type": "FeatureCollection", "features": [
+        {"type": "Feature",
+         "properties": {"name": a[0], "source": "entered"},
+         "geometry": {"type": "Point", "coordinates": [a[2], a[1]]}}
+        for a in anchors]}
+    with open(ANCHORS_GEOJSON_BASENAME.format(year=year), "w") as f:
+        json.dump(anchor_gj, f, indent=2)
 
     # 3. fit transform on anchor points, in local flat-earth ft
     lat0 = sum(a[1] for a in anchors) / len(anchors)
@@ -285,11 +380,10 @@ def main():
         nx, ny = apply_similarity(angle, scale, tx, ty, rx, ry)
         nlat, nlon = local_to_latlon(lat0, lon0, nx, ny)
 
-        status = "entered" if p["name"] in {a[0] for a in anchors} else "autofilled"
+        status = "entered" if p["name"] in anchor_names else "autofilled"
         err_ft = ""
-        if p["name"] in {a[0] for a in anchors}:
-            # find the residual for this anchor
-            idx = [a[0] for a in anchors].index(p["name"])
+        if p["name"] in anchor_names:
+            idx = anchor_names.index(p["name"])
             err_ft = f"{resid[idx]:.1f}"
 
         rows.append({
@@ -314,8 +408,10 @@ def main():
 
     rows.sort(key=lambda r: (r["status"] != "entered", r["name"]))
 
-    # 4b. optionally transform the street grid too
+    # 4b. optionally transform the street grid into its own geojson (clean
+    #     LineString layer so QGIS renders it properly under the points)
     streets_added = 0
+    streets_gj = {"type": "FeatureCollection", "features": []}
     if args.include_streets:
         streets_path = os.path.join(
             ref_dir, f"street_lines_{ref_year}.geojson")
@@ -327,13 +423,12 @@ def main():
                     nx, ny = apply_similarity(angle, scale, tx, ty, rx, ry)
                     nlat, nlon = local_to_latlon(lat0, lon0, nx, ny)
                     coords.append([nlon, nlat])
-                geojson["features"].append({
+                streets_gj["features"].append({
                     "type": "Feature",
                     "properties": {
                         "name": s["name"],
                         "kind": s["kind"],
-                        "status": "autofilled_street",
-                        "residual_ft": "",
+                        "street_status": "autofilled",
                     },
                     "geometry": {"type": "LineString", "coordinates": coords},
                 })
@@ -344,6 +439,7 @@ def main():
 
     out_csv = OUT_CSV_BASENAME.format(year=year)
     out_gj = OUT_GEOJSON_BASENAME.format(year=year)
+    streets_gj_path = STREETS_GEOJSON_BASENAME.format(year=year)
     with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(
             f, fieldnames=["name", "type", "status", "residual_ft",
@@ -352,12 +448,27 @@ def main():
         w.writerows(rows)
     with open(out_gj, "w") as f:
         json.dump(geojson, f, indent=2)
+    if args.include_streets:
+        with open(streets_gj_path, "w") as f:
+            json.dump(streets_gj, f, indent=2)
+
+    # 4c. let QGIS itself author the ready-to-open project (project CRS,
+    #     layer CRSs, styles and the osm base all come out correct)
+    qgs_path = build_qgis_project_via_qgis(
+        year, os.getcwd(), ref_year)
 
     n_fill = sum(1 for r in rows if r["status"] == "autofilled")
-    print(f"wrote {out_csv} and {out_gj}")
+    print(f"wrote {out_csv}, {out_gj}"
+          + (f", {streets_gj_path}" if args.include_streets else "")
+          + f", anchors_{year}.geojson")
     print(f"  {len(anchors)} entered anchor(s), {n_fill} autofilled (unconfirmed)")
     if streets_added:
         print(f"  + {streets_added} street lines autofilled")
+    print()
+    if qgs_path:
+        print(f" QGIS: double-click {qgs_path} to open the ready-to-go map")
+    else:
+        print(" QGIS map: skipped (QGIS python not found)")
     print()
     print(" NOTE: autofilled points are UNCONFIRMED. Verify important ones "
           "and re-run with more anchors.")

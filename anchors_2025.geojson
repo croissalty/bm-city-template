@@ -1,0 +1,33 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Center Camp",
+        "source": "entered"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.21073542116683,
+          40.78108859485657
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "The Man",
+        "source": "entered"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.20300709606865,
+          40.78696344894566
+        ]
+      }
+    }
+  ]
+}

@@ -42,13 +42,26 @@ median against real street lines.
    https://api.burningman.org or the innovate GIS data repo:
    https://github.com/burningmantech/innovate-GIS-data
 
-2. create `anchors_YYYY.csv` with at least 2 rows (more = better). use
-   exactly the place names from the reference files:
-   ```
-   name,lat,lon
-   The Man,40.783247448000054,-119.20788409599999
-   Center Camp,40.777372264000064,-119.21561156099995
-   ```
+2. enter anchors — pick one of three ways:
+   - create `anchors_YYYY.csv` (or copy + edit the prior year's):
+     ```
+     name,lat,lon
+     The Man,40.783247448000054,-119.20788409599999
+     Center Camp,40.777372264000064,-119.21561156099995
+     ```
+   - skip the file and pass them straight on the command line:
+     ```
+     python3 city_template.py --year 2027 \
+       --anchor "The Man, 40.783247448, -119.207884096" \
+       --anchor "Center Camp, 40.777372264, -119.215611561"
+     ```
+   - or run with neither and the tool will prompt you line by line:
+     ```
+     anchor> The Man, 40.783247448, -119.207884096
+     anchor> Center Camp, 40.777372264, -119.215611561
+     anchor>    <- blank line finishes
+     ```
+   use exactly the place names from the reference files.
    good anchor choices (usually published early, geometrically distinct):
    - The Man
    - Center Camp
@@ -63,11 +76,25 @@ median against real street lines.
    ```
    python3 city_template.py --year 2027 --include-streets
    ```
+   the run also hands the outputs to QGIS itself (via its bundled python) so
+   QGIS authors `bm_city_2027.qgs` — project + layer CRSs, styles and the
+   basemap are correct by construction. if QGIS isn't installed the data
+   files still write and it tells you how to point at QGIS (`QGIS_PYTHON`).
 
-4. open `places_2027_fill.geojson` in QGIS / drop on a map. `entered`
-   anchors are marked green; `autofilled` things are amber and unconfirmed.
+4. open the ready-to-go map: **double-click `bm_city_2027.qgs`**, or eyeball
+   `bm_city_2027_preview.png` first (a render of the same project). it's a
+   self-contained QGIS project — the predicted places (green=entered,
+   amber=autofilled), your anchors, the real 2026 portals/plazas/streets, and
+   an OpenStreetMap basemap, all already layered. the project renders in
+   EPSG:3857 (so the circular playa stays round and lines up with the OSM
+   tiles) while every geojson stays in EPSG:4326 — QGIS reprojects them on
+   the fly. nothing you do here touches any other map you have.
 
-5. spot-check: verify gate/center camp/temple/the man against the year's
+5. prefer data over the map? `places_2027_fill.csv` has the same points as
+   rows. `entered` anchors are green; `autofilled` things are amber and
+   unconfirmed.
+
+6. spot-check: verify gate/center camp/temple/the man against the year's
    published coords. if any autofilled point is wrong, add it as an anchor
    and re-run.
 
@@ -75,10 +102,22 @@ median against real street lines.
 
 - repository `reference/` holds the 2026 geometry used as the template base
   (plus the 2024/2025 files kept for the rigidity check above).
-- output: `places_YYYY_fill.csv` + `places_YYYY_fill.geojson`.
+- per-year output (all in the same folder as the tool):
+  - `places_YYYY_fill.csv` — points as rows (name,type,status,lat,lon)
+  - `places_YYYY_fill.geojson` — the point layer (entered/autofilled)
+  - `streets_YYYY_fill.geojson` — street grid as clean line features
+  - `anchors_YYYY.geojson` — just the anchors you entered
+  - `bm_city_YYYY.qgs` — the ready-to-open QGIS project
+  - `bm_city_YYYY_preview.png` — a render of the project (needs QGIS only when
+    it's generated)
+  - `osm_tiles_YYYY.xml` — the OpenStreetMap tile config the project uses
 
 ## options
 
 - `--year NNNN` (required) — target year; reads `anchors_NNNN.csv`
 - `--include-streets` — also transform the street grid (rings + avenues)
+- `--anchor "name,lat,lon"` — an anchor on the command line (repeatable;
+  no csv file needed)
 - `--reference-dir DIR` — where the reference geojson files live
+- `QGIS_PYTHON` (env) — path to the QGIS-bundled python, if not on this mac
+  at `/Applications/QGIS.app/Contents/MacOS/python3.12`

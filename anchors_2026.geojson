@@ -1,0 +1,47 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "The Man",
+        "source": "entered"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.20788409599999,
+          40.783247448000054
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Center Camp",
+        "source": "entered"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.21561156099995,
+          40.777372264000064
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Gate Actual",
+        "source": "entered"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.23408814999999,
+          40.768725267000036
+        ]
+      }
+    }
+  ]
+}
